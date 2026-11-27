@@ -376,10 +376,10 @@ def instruction(rng, names):
 LITERAL_OPERATION_NAMES = ("v_madmk_f32", "v_madak_f32", "v_fmamk_f32", "v_fmaak_f32")
 # The 64-bit operations (including v_fma_f64 now that overflow returns ±infinity in both models).
 WIDE_GENERIC = tuple(WIDE_OPERATIONS)
-# The scalar half-precision operations (emu/rdna2_exec_f16.py) that the Rust port runs, in VOP1, VOP2 and VOP3.
-# The transcendentals are not ported yet: the Rust refuses them, so they stay out of the generator until they are.
+# The scalar half-precision operations (emu/rdna2_exec_f16.py), in VOP1, VOP2 and VOP3. The transcendentals are
+# also compared on every input by tests/test_rdna2_ref_parity_f16.py.
 F16_TRANSCENDENTALS = ("v_rcp_f16", "v_sqrt_f16", "v_rsq_f16", "v_log_f16", "v_exp_f16", "v_sin_f16", "v_cos_f16")
-F16_NAMES = tuple(name for name in F16_OPERATIONS if name not in F16_TRANSCENDENTALS)
+F16_NAMES = tuple(F16_OPERATIONS)
 # The 34 half-precision compares (emu/rdna2_exec_cmpf16.py), in VOPC and VOP3.
 F16_COMPARES = tuple(COMPAREF16)
 DIV_NAMES = (

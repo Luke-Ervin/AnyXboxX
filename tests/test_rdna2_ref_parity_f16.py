@@ -1,13 +1,14 @@
 """Parity of the scalar half-precision instructions between the Python model (emu/rdna2_exec_f16.py and
 emu/rdna2_exec_cmpf16.py) and the Rust port (crates/anyxboxx-rdna2-ref: f16.rs, f16_ops.rs, compare_f16.rs):
 the operations in VOP1, VOP2 and VOP3 and the 34 compares in VOPC and VOP3, with the VOP3 modifiers (abs, neg,
-op_sel, clamp) and the forms the model refuses. The transcendentals are not ported yet and are left out
-(F16_NAMES). The random generator of test_rdna2_ref_parity.py draws these names too.
+op_sel, clamp) and the forms the model refuses, and the seven transcendentals on all 65,536 inputs (their last
+bit comes from the host's maths library, as in the model). The random generator of test_rdna2_ref_parity.py
+draws these names too.
 """
 import random
 
-from test_rdna2_ref_parity import (F16_COMPARES, F16_NAMES, LITERAL, OPCODES, SEED, V0, assert_same, binary,
-                                   program, run_python, vop1, vop2, vop3, vopc, words)
+from test_rdna2_ref_parity import (F16_COMPARES, F16_NAMES, F16_TRANSCENDENTALS, LITERAL, OPCODES, SEED, V0,
+                                   assert_same, binary, program, run_python, vop1, vop2, vop3, vopc, words)
 
 # Halves at the edges: signed zeros, ±1, infinities, quiet and signalling NaNs, the largest finite value,
 # subnormals, the smallest normal, ties for the rounding instructions (0.5, 1.5, 2.5) and the value just
@@ -166,3 +167,30 @@ def test_random_half_precision_programs_match_the_python_model():
         executed += run_both(exe, program_words, scalars).startswith("steps")
     # Most programs must run, not be refused, for the comparison to cover the operations.
     assert executed > F16_PROGRAMS // 2, executed
+
+
+# Exhaustive transcendentals: each program puts 64 lanes × 128 registers of consecutive halves (v1 to v128, low
+# halves, high halves 0) through one operation in place, so 8 programs cover the 65,536 inputs.
+HALVES = 1 << 16
+EXHAUSTIVE_LANES = 64
+EXHAUSTIVE_REGISTERS = 128
+LANE = 200                                           # v200: the lane index
+MBCNT_HI = "v_mbcnt_hi_u32_b32"
+
+
+def exhaustive_program(name, first):
+    """The halves first to first + 8191: v[r] of lane L holds first + (r - 1) × 64 + L."""
+    body = [vop3(MBCNT_LO, LANE, (MINUS_ONE, ZERO, 0)), vop3(MBCNT_HI, LANE, (MINUS_ONE, V0 + LANE, 0))]
+    for register in range(1, EXHAUSTIVE_REGISTERS + 1):
+        body += [vop2("v_add_nc_u32", register, LITERAL, LANE),
+                 first + (register - 1) * EXHAUSTIVE_LANES]
+    body += [vop1(name, register, V0 + register) for register in range(1, EXHAUSTIVE_REGISTERS + 1)]
+    return program(*words(*body))
+
+
+def test_transcendentals_match_the_python_model_on_every_input():
+    exe = binary()
+    step = EXHAUSTIVE_LANES * EXHAUSTIVE_REGISTERS
+    for name in F16_TRANSCENDENTALS:
+        for first in range(0, HALVES, step):
+            assert_same(exe, EXHAUSTIVE_LANES, False, [], exhaustive_program(name, first))

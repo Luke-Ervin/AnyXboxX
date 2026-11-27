@@ -14,8 +14,8 @@
 //! interpolation (`interp`).
 //!
 //! Also the scalar half-precision operations of VOP1, VOP2 and VOP3 (`f16`, with the operations in
-//! `f16_ops`), apart from the f16 transcendentals, which are not ported yet, and the half-precision
-//! compares of VOPC and VOP3 (`compare_f16`).
+//! `f16_ops` and the transcendentals in `f16_math`), and the half-precision compares of VOPC and VOP3
+//! (`compare_f16`).
 
 pub mod atomic;
 pub mod atomic_float;
@@ -34,6 +34,7 @@ pub mod export;
 pub mod ext;
 pub mod ext_compare;
 pub mod f16;
+pub mod f16_math;
 pub mod f16_ops;
 pub mod flat;
 pub mod float;

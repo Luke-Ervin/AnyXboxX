@@ -1,9 +1,10 @@
-//! The scalar half-precision operations of the model: `OPERATIONS` of `emu/rdna2_exec_f16.py`, apart from
-//! the transcendentals (`v_rcp/sqrt/rsq/log/exp/sin/cos_f16`), which are not ported yet and stay refused.
+//! The scalar half-precision operations of the model: `OPERATIONS` of `emu/rdna2_exec_f16.py`. The
+//! transcendentals (`v_rcp/sqrt/rsq/log/exp/sin/cos_f16`) are in `f16_math`.
 //!
 //! A result is computed in double precision from the 16-bit inputs, then rounded once to binary16 with
 //! ties to even (`half_from_f64`, the model's `half_bits`). Any NaN result is `HALF_NAN`, without payload.
 
+use crate::f16_math;
 use crate::float::{bits_float, frexp, ldexp, py_min};
 use crate::half::{
     HALF_INFINITY, HALF_MASK, HALF_NAN, half_from_f64, half_max, half_min, half_to_f32_bits,
@@ -60,7 +61,14 @@ pub fn kinds(name: &str) -> Option<&'static [Kind]> {
         | "v_cvt_f32_f16"
         | "v_frexp_mant_f16"
         | "v_frexp_exp_i16_f16"
-        | "v_fract_f16" => &[Half],
+        | "v_fract_f16"
+        | "v_rcp_f16"
+        | "v_sqrt_f16"
+        | "v_rsq_f16"
+        | "v_log_f16"
+        | "v_exp_f16"
+        | "v_sin_f16"
+        | "v_cos_f16" => &[Half],
         "v_cvt_pkrtz_f16_f32" => &[Word, Word],
         "v_cvt_f16_f32" => &[Word],
         _ => return None,
@@ -105,6 +113,13 @@ pub fn compute(name: &str, inputs: Inputs) -> Option<u32> {
         "v_frexp_mant_f16" => half_frexp(a).0,
         "v_frexp_exp_i16_f16" => half_frexp(a).1 as u32 & HALF_MASK,
         "v_fract_f16" => half_fract(a),
+        "v_rcp_f16" => f16_math::rcp(a),
+        "v_sqrt_f16" => f16_math::sqrt(a),
+        "v_rsq_f16" => f16_math::rsq(a),
+        "v_log_f16" => f16_math::log2(a),
+        "v_exp_f16" => f16_math::exp2(a),
+        "v_sin_f16" => f16_math::trig(a, false),
+        "v_cos_f16" => f16_math::trig(a, true),
         _ => return None,
     })
 }
@@ -246,10 +261,19 @@ mod tests {
     }
 
     #[test]
-    fn the_transcendentals_are_not_ported_yet() {
-        for name in ["v_rcp_f16", "v_sqrt_f16", "v_sin_f16"] {
-            assert!(kinds(name).is_none());
-            assert!(compute(name, Inputs::default()).is_none());
+    fn the_transcendentals_read_one_half() {
+        for name in [
+            "v_rcp_f16",
+            "v_sqrt_f16",
+            "v_rsq_f16",
+            "v_log_f16",
+            "v_exp_f16",
+            "v_sin_f16",
+            "v_cos_f16",
+        ] {
+            assert_eq!(kinds(name), Some(&[Half][..]), "{name}");
         }
+        assert_eq!(unary("v_sqrt_f16", 0x4400), 0x4000);
+        assert!(kinds("v_cvt_f16_u16").is_none());
     }
 }
