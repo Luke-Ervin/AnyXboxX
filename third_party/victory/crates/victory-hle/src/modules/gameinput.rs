@@ -157,6 +157,66 @@ fn fallback(keys: &[KeyState], mouse: Mouse) -> PadState {
     }
 }
 
+/// What `VICTORY_KEYS_TRACE` reports: the held virtual keys, in the order they came, and the stand-in
+/// pad's triggers.
+#[derive(Debug, Clone, PartialEq)]
+struct KeysTrace {
+    keys: Vec<u8>,
+    left_trigger: f32,
+    right_trigger: f32,
+}
+
+impl KeysTrace {
+    fn of(keys: &[KeyState], pad: &PadState) -> KeysTrace {
+        KeysTrace {
+            keys: keys.iter().map(|k| k.virtual_key).collect(),
+            left_trigger: pad.left_trigger,
+            right_trigger: pad.right_trigger,
+        }
+    }
+
+    /// The keys as `0x20 0xA0 ...`, for the log line.
+    fn keys_text(&self) -> String {
+        self.keys
+            .iter()
+            .map(|vk| format!("{vk:#04X}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+/// Whether `now` differs from the last reported state; records it when it does.
+fn trace_changed(last: &mut Option<KeysTrace>, now: KeysTrace) -> bool {
+    if last.as_ref() == Some(&now) {
+        return false;
+    }
+    *last = Some(now);
+    true
+}
+
+/// (AnyXboxX) `VICTORY_KEYS_TRACE=1`: one info line each time the held virtual keys or the stand-in
+/// pad's triggers change, focus or not, in any build. It shows what reaches the stand-in pad while a key
+/// is held: issue 478, where Space and Left Shift pull the triggers in [`fallback`] (unit-tested) but a
+/// boat did not move in game. Unset: nothing is logged.
+fn trace_keys(keys: &[KeyState], pad: &PadState) {
+    static ON: LazyLock<bool> =
+        LazyLock::new(|| std::env::var("VICTORY_KEYS_TRACE").is_ok_and(|v| v.trim() == "1"));
+    static LAST: Mutex<Option<KeysTrace>> = Mutex::new(None);
+    if !*ON {
+        return;
+    }
+    let now = KeysTrace::of(keys, pad);
+    let mut last = LAST.lock().unwrap_or_else(PoisonError::into_inner);
+    if trace_changed(&mut last, now.clone()) {
+        tracing::info!(
+            keys = %now.keys_text(),
+            left_trigger = now.left_trigger,
+            right_trigger = now.right_trigger,
+            "stand-in pad input"
+        );
+    }
+}
+
 /// Two pads as one: buttons of both, and of each axis and trigger the one
 /// pushed further.
 fn merged(a: PadState, b: PadState) -> PadState {
@@ -526,8 +586,10 @@ impl State {
     ) -> Vec<Event> {
         let now = now();
         let mut events = std::mem::take(&mut self.pending);
+        let stand_in = fallback(&keys, mouse);
+        trace_keys(&keys, &stand_in);
         if one_pad {
-            let pad = pads.into_iter().flatten().fold(fallback(&keys, mouse), merged);
+            let pad = pads.into_iter().flatten().fold(stand_in, merged);
             self.update(devices, FALLBACK, Some(Value::Pad(pad)), now, &mut events);
             self.update(devices, KEYBOARD, Some(Value::Keys(keys)), now, &mut events);
             return events;
@@ -536,7 +598,7 @@ impl State {
         for (slot, pad) in pads.into_iter().enumerate() {
             self.update(devices, slot, pad.map(Value::Pad), now, &mut events);
         }
-        let fallback = (!any_pad).then(|| Value::Pad(fallback(&keys, mouse)));
+        let fallback = (!any_pad).then_some(Value::Pad(stand_in));
         self.update(devices, FALLBACK, fallback, now, &mut events);
         self.update(devices, KEYBOARD, Some(Value::Keys(keys)), now, &mut events);
         events
@@ -1326,10 +1388,13 @@ mod host {
 
     /// A key's virtual-key code: a letter, a digit, or `Enter`, `Esc`,
     /// `Tab`, `Back`, `Up`, `Down`, `Left`, `Right` (the stand-in pad's
-    /// table maps them to buttons).
+    /// table maps them to buttons), or `Space` and `LeftShift` (the stand-in
+    /// pad's right and left triggers).
     fn key_code(key: &str) -> Option<u8> {
         Some(match key {
             "Enter" => 0x0D,
+            "Space" => super::VK_SPACE,
+            "LeftShift" => super::VK_LSHIFT,
             "Esc" => 0x1B,
             "Tab" => 0x09,
             "Back" => 0x08,
@@ -1409,7 +1474,8 @@ mod host {
     /// 0.2 s that long after input starts (`<from>-<to>:<key>`: all that
     /// time), with or without focus. A key is a
     /// letter, a digit, or `Enter`, `Esc`, `Tab`, `Back`, `Up`, `Down`,
-    /// `Left`, `Right` (the stand-in pad's table maps them to buttons).
+    /// `Left`, `Right` (the stand-in pad's table maps them to buttons), or
+    /// `Space` and `LeftShift` (its triggers), as [`key_code`] names them.
     fn scripted() -> Vec<u8> {
         static SCRIPT: LazyLock<(Instant, Vec<(Duration, Duration, u8)>)> = LazyLock::new(|| {
             let list = std::env::var("VICTORY_KEYS").unwrap_or_default();
@@ -1441,6 +1507,21 @@ mod host {
             GetWindowThreadProcessId(GetForegroundWindow(), &mut process);
             process == GetCurrentProcessId()
         }
+    }
+
+    #[test]
+    fn space_and_left_shift_can_be_scripted() {
+        assert_eq!(key_code("Space"), Some(super::VK_SPACE));
+        assert_eq!(key_code("LeftShift"), Some(super::VK_LSHIFT));
+        assert_eq!(key_code("Shift"), None);
+        let now = Instant::now();
+        assert_eq!(
+            asked("Space 0.5\nLeftShift 1\n", now),
+            [
+                (now + Duration::from_millis(500), super::VK_SPACE),
+                (now + Duration::from_secs(1), super::VK_LSHIFT)
+            ]
+        );
     }
 
     #[test]
@@ -1822,6 +1903,25 @@ mod tests {
         // The old keys still pull the same triggers.
         let pad = fallback(&[key(b'Z'), key(b'C')], Mouse::default());
         assert_eq!((pad.left_trigger, pad.right_trigger), (1.0, 1.0));
+    }
+
+    #[test]
+    fn the_keys_trace_reports_each_change_once() {
+        let space = [KeyState {
+            virtual_key: VK_SPACE,
+            ..Default::default()
+        }];
+        let held = KeysTrace::of(&space, &fallback(&space, Mouse::default()));
+        assert_eq!(held.keys_text(), "0x20");
+        assert_eq!((held.left_trigger, held.right_trigger), (0.0, 1.0));
+        let mut last = None;
+        assert!(trace_changed(&mut last, held.clone()));
+        assert!(
+            !trace_changed(&mut last, held),
+            "the same keys again: no new line"
+        );
+        let released = KeysTrace::of(&[], &fallback(&[], Mouse::default()));
+        assert!(trace_changed(&mut last, released));
     }
 
     #[test]
