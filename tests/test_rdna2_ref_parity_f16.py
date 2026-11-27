@@ -1,12 +1,13 @@
-"""Parity of the scalar half-precision instructions between the Python model (emu/rdna2_exec_f16.py) and the
-Rust port (crates/anyxboxx-rdna2-ref, f16.rs and f16_ops.rs): VOP1, VOP2 and their VOP3 forms, with the VOP3
-modifiers (abs, neg, op_sel, clamp) and the forms the model refuses. The transcendentals are not ported yet
-and are left out (F16_NAMES). The random generator of test_rdna2_ref_parity.py draws these names too.
+"""Parity of the scalar half-precision instructions between the Python model (emu/rdna2_exec_f16.py and
+emu/rdna2_exec_cmpf16.py) and the Rust port (crates/anyxboxx-rdna2-ref: f16.rs, f16_ops.rs, compare_f16.rs):
+the operations in VOP1, VOP2 and VOP3 and the 34 compares in VOPC and VOP3, with the VOP3 modifiers (abs, neg,
+op_sel, clamp) and the forms the model refuses. The transcendentals are not ported yet and are left out
+(F16_NAMES). The random generator of test_rdna2_ref_parity.py draws these names too.
 """
 import random
 
-from test_rdna2_ref_parity import (F16_NAMES, LITERAL, OPCODES, SEED, V0, assert_same, binary, program,
-                                   run_python, vop1, vop2, vop3, words)
+from test_rdna2_ref_parity import (F16_COMPARES, F16_NAMES, LITERAL, OPCODES, SEED, V0, assert_same, binary,
+                                   program, run_python, vop1, vop2, vop3, vopc, words)
 
 # Halves at the edges: signed zeros, ±1, infinities, quiet and signalling NaNs, the largest finite value,
 # subnormals, the smallest normal, ties for the rounding instructions (0.5, 1.5, 2.5) and the value just
@@ -20,7 +21,8 @@ WORD_SPECIALS = (0x3F800000, 0xBF800000, 0x477FE000, 0x477FF000, 0x477FEFFF, 0x3
                  0x7F800000, 0xFF800000, 0x7FC00000, 0x7F800001, 0x7F7FFFFF, 0x3F801800, 0x00000001,
                  0x80000000)
 ENCODINGS = sorted((family, name) for family, name in OPCODES
-                   if name in F16_NAMES and family in ("VOP1", "VOP2", "VOP3"))
+                   if (name in F16_NAMES and family in ("VOP1", "VOP2", "VOP3"))
+                   or (name in F16_COMPARES and family in ("VOPC", "VOP3")))
 LITERAL_K = ("v_fmamk_f16", "v_fmaak_f16")
 VDST = 9
 MBCNT_LO, MINUS_ONE, ZERO = "v_mbcnt_lo_u32_b32", 193, 128
@@ -49,9 +51,12 @@ def setup(rng):
 
 def instruction(family, name, sources, literal, modifiers=None):
     """The words of one f16 instruction; the literal follows when a source is the literal code, or always for
-    the VOP2 forms of v_fmamk_f16 and v_fmaak_f16 (their constant K)."""
+    the VOP2 forms of v_fmamk_f16 and v_fmaak_f16 (their constant K). A VOP3 compare writes its mask to the
+    SGPR pair s[VDST:VDST+1] (VCC for VOPC, EXEC for v_cmpx)."""
     if family == "VOP1":
         encoded = [vop1(name, VDST, sources[0])]
+    elif family == "VOPC":
+        encoded = [vopc(name, sources[0], sources[1] - V0)]
     elif family == "VOP2":
         encoded = [vop2(name, VDST, sources[0], sources[1] - V0)]
     else:
@@ -78,7 +83,7 @@ def test_every_half_precision_encoding_runs_in_both_models():
     must give the same registers. Fails on a binary that refuses the f16 instructions."""
     exe = binary()
     rng = random.Random(SEED + 16)
-    assert len(ENCODINGS) >= 40, ENCODINGS
+    assert len(ENCODINGS) >= 100, len(ENCODINGS)
     for family, name in ENCODINGS:
         program_words = program(*words(*setup(rng), *instruction(family, name, plain_sources(family, name),
                                                                   0x1234_3E00)))
@@ -102,6 +107,13 @@ def refused_cases():
         ("VOP3", "v_add_f16", (242, V0 + 1, 0), {"op_sel": 0b0001}),
         ("VOP2", "v_add_f16", (0xF9, V0 + 2), None),
         ("VOP1", "v_floor_f16", (0xFA,), None),
+        ("VOP3", "v_cmp_lt_f16", registers, {"op_sel": 0b0001}),
+        ("VOP3", "v_cmpx_eq_f16", registers, {"clamp": 1}),
+        ("VOP3", "v_cmp_ge_f16", registers, {"omod": 2}),
+        ("VOP3", "v_cmp_class_f16", registers, {"abs_bits": 0b010}),
+        ("VOP3", "v_cmpx_class_f16", registers, {"neg": 0b010}),
+        ("VOPC", "v_cmp_lt_f16", (0xF9, V0 + 2), None),
+        ("VOPC", "v_cmpx_class_f16", (0xE9, V0 + 2), None),
     ]
 
 
@@ -110,7 +122,7 @@ def test_half_precision_refusals_match_the_python_model():
     rng = random.Random(SEED + 17)
     for family, name, sources, modifiers in refused_cases():
         encoded = instruction(family, name, sources, 0x3C00, modifiers)
-        if family != "VOP3" and sources[0] in (0xF9, 0xFA):
+        if family != "VOP3" and sources[0] in (0xF9, 0xFA, 0xE9):
             encoded.append(rng.getrandbits(32))   # the extension word
         python = run_both(exe, program(*words(*setup(rng), *encoded)))
         assert python == "error untranslated\n", (family, name, modifiers, python)
@@ -121,11 +133,13 @@ def random_sources(rng, count):
     return tuple(rng.choice(pool) if rng.random() < 0.5 else V0 + rng.choice((1, 2, 3, 4)) for _ in range(count))
 
 
-def random_modifiers(rng):
+def random_modifiers(rng, name):
     if rng.random() < 0.4:
         return {}
     modifiers = {"op_sel": rng.randrange(16), "abs_bits": rng.randrange(8), "neg": rng.randrange(8),
                  "clamp": rng.randrange(2)}
+    if name in F16_COMPARES and rng.random() < 0.8:
+        modifiers.update(op_sel=0, clamp=0)       # refused on a compare: keep most of them running
     if rng.random() < 0.1:
         modifiers["omod"] = rng.randrange(1, 4)
     return modifiers
@@ -135,9 +149,9 @@ def random_case(rng):
     """One program: the setup, then one f16 instruction with random operands and modifiers."""
     family, name = rng.choice(ENCODINGS)
     sources = random_sources(rng, 3)
-    if family == "VOP2":
+    if family in ("VOP2", "VOPC"):
         sources = (sources[0], V0 + rng.choice((1, 2, 3, 4, VDST)))    # vsrc1 is a VGPR
-    modifiers = random_modifiers(rng) if family == "VOP3" else None
+    modifiers = random_modifiers(rng, name) if family == "VOP3" else None
     literal = operand(rng)
     scalars = [(0, operand(rng)), (1, operand(rng))]
     return program(*words(*setup(rng), *instruction(family, name, sources, literal, modifiers))), scalars

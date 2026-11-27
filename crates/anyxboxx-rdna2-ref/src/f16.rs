@@ -46,8 +46,8 @@ fn compute(name: &str, inputs: Inputs) -> Result<u32, Error> {
         .ok_or_else(|| refuse(format!("instruction non traduite : {name}")))
 }
 
-/// `_source`: a source as its kind reads it, for one lane.
-fn source(
+/// `_source`: a source as its kind reads it, for one lane (also read by `compare_f16`).
+pub fn source(
     wave: &Wave,
     name: &str,
     kind: Kind,
@@ -181,8 +181,9 @@ fn check_vop3(
     Ok(())
 }
 
-/// `_modified`: VOP3 abs and neg on the sign of the half (bit 15) or of the word (bit 31).
-fn modified(value: u32, kind: Kind, fields: &Fields, index: usize) -> u32 {
+/// `_modified`: VOP3 abs and neg on the sign of the half (bit 15) or of the word (bit 31); an integer
+/// source is left as it is.
+pub fn modified(value: u32, kind: Kind, fields: &Fields, index: usize) -> u32 {
     let sign = match kind {
         Kind::Integer => return value,
         Kind::Word => WORD_SIGN,

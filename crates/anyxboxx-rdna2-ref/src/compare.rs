@@ -83,6 +83,20 @@ fn float_test(test: Test, x: f64, y: f64) -> bool {
     }
 }
 
+/// Whether `test` names one of the 16 float tests of `FLOAT_TESTS` (`f`, `lt`, ..., `tru`).
+pub fn is_float_test(test: &str) -> bool {
+    FLOAT_NAMES.contains(&test)
+}
+
+/// A float test of `FLOAT_TESTS` by its name, on two values (used by the f16 compares of `compare_f16`).
+/// `None` when `test` is not a float test.
+pub fn float_named(test: &str, x: f64, y: f64) -> Option<bool> {
+    if !is_float_test(test) {
+        return None;
+    }
+    Some(float_test(test_of(test)?, x, y))
+}
+
 /// The integer tests of `INTEGER_TESTS`.
 fn integer_test(test: Test, x: i128, y: i128) -> bool {
     match test {

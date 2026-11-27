@@ -356,6 +356,10 @@ pub fn execute(
         crate::f16::execute_vop3(wave, name, word, literal)?;
         return Ok(true);
     }
+    if crate::compare_f16::is_compare(name) {
+        crate::compare_f16::execute_vop3(wave, name, word, literal)?;
+        return Ok(true);
+    }
     if crate::wide::execute(
         wave,
         name,

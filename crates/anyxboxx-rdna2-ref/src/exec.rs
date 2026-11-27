@@ -100,6 +100,11 @@ fn execute_compare(
     literal: Option<u32>,
 ) -> Result<bool, Error> {
     let (src0, vsrc1) = (word & 0x1FF, (word >> 9) & 0xFF);
+    if crate::compare_f16::is_compare(name) {
+        // Ahead of the SDWA and DPP path, as in the Python: the f16 compares refuse those forms themselves.
+        crate::compare_f16::execute(wave, name, src0, vsrc1, literal)?;
+        return Ok(true);
+    }
     if EXTENSION_CODES.contains(&src0) && ext_compare::supports(name) {
         if src0 != ext::SDWA {
             return Err(ext_compare::refuse_dpp(name, src0 == ext::DPP16));

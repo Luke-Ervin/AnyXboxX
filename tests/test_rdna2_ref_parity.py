@@ -21,6 +21,7 @@ from emu import rdna2_exec, rdna2_image
 from emu.rdna2_exec import VOP2_CARRY, Wave
 from emu.rdna2_exec_cmp64 import COMPARE64
 from emu.rdna2_exec_dot import OPERATIONS as DOT_OPERATIONS
+from emu.rdna2_exec_cmpf16 import COMPAREF16
 from emu.rdna2_exec_f16 import OPERATIONS as F16_OPERATIONS
 from emu.rdna2_exec_int16 import PACKED
 from emu.rdna2_exec_pkf16 import PACKED_F16, VOP3P as PKF16_VOP3P
@@ -284,13 +285,14 @@ def random_program(rng):
             or name in WIDE_GENERIC
             or name in MOVREL_VECTOR
             or name in F16_NAMES
+            or name in F16_COMPARES
         ):
             names[family].append((opcode, name))
         if family == "VOP1" and (name in WIDE_GENERIC or name in MOVREL_VECTOR):
             names[family].append((opcode, name))
         if family == "VOP3P" and name in DOT_OPERATIONS:
             names[family].append((opcode, name))
-        if family == "VOPC" and (name in VECTOR_COMPARE or name in COMPARE64):
+        if family == "VOPC" and (name in VECTOR_COMPARE or name in COMPARE64 or name in F16_COMPARES):
             names[family].append((opcode, name))
         if family in VECTOR_FAMILIES and (
             name in VECTOR or name in VECTOR_NO_OPERATION or name in VOP2_CARRY or name in F16_NAMES
@@ -378,6 +380,8 @@ WIDE_GENERIC = tuple(WIDE_OPERATIONS)
 # The transcendentals are not ported yet: the Rust refuses them, so they stay out of the generator until they are.
 F16_TRANSCENDENTALS = ("v_rcp_f16", "v_sqrt_f16", "v_rsq_f16", "v_log_f16", "v_exp_f16", "v_sin_f16", "v_cos_f16")
 F16_NAMES = tuple(name for name in F16_OPERATIONS if name not in F16_TRANSCENDENTALS)
+# The 34 half-precision compares (emu/rdna2_exec_cmpf16.py), in VOPC and VOP3.
+F16_COMPARES = tuple(COMPAREF16)
 DIV_NAMES = (
     "v_div_scale_f32", "v_div_scale_f64", "v_div_fmas_f32", "v_div_fmas_f64", "v_div_fixup_f32", "v_div_fixup_f64",
 )
@@ -403,7 +407,7 @@ def vop3_words(rng, opcode, name):
     vdst = rng.randrange(256)
     if name in ("v_readfirstlane_b32", "v_readlane_b32"):
         vdst = rng.randrange(128)                                    # an SGPR destination
-    if (name in VECTOR_COMPARE or name in COMPARE64) and "cmpx" not in name:
+    if (name in VECTOR_COMPARE or name in COMPARE64 or name in F16_COMPARES) and "cmpx" not in name:
         vdst = rng.randrange(126)                                    # the compare writes the SGPR pair vdst
     field_8_14 = abs_bits
     if name in VOP3_CARRY or name in VOP3_MAD64:
