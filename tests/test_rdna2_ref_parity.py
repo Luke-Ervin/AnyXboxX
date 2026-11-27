@@ -21,6 +21,7 @@ from emu import rdna2_exec, rdna2_image
 from emu.rdna2_exec import VOP2_CARRY, Wave
 from emu.rdna2_exec_cmp64 import COMPARE64
 from emu.rdna2_exec_dot import OPERATIONS as DOT_OPERATIONS
+from emu.rdna2_exec_f16 import OPERATIONS as F16_OPERATIONS
 from emu.rdna2_exec_int16 import PACKED
 from emu.rdna2_exec_pkf16 import PACKED_F16, VOP3P as PKF16_VOP3P
 from emu.rdna2_exec_memory import PAGE
@@ -282,6 +283,7 @@ def random_program(rng):
             or name in COMPARE64
             or name in WIDE_GENERIC
             or name in MOVREL_VECTOR
+            or name in F16_NAMES
         ):
             names[family].append((opcode, name))
         if family == "VOP1" and (name in WIDE_GENERIC or name in MOVREL_VECTOR):
@@ -290,7 +292,9 @@ def random_program(rng):
             names[family].append((opcode, name))
         if family == "VOPC" and (name in VECTOR_COMPARE or name in COMPARE64):
             names[family].append((opcode, name))
-        if family in VECTOR_FAMILIES and (name in VECTOR or name in VECTOR_NO_OPERATION or name in VOP2_CARRY):
+        if family in VECTOR_FAMILIES and (
+            name in VECTOR or name in VECTOR_NO_OPERATION or name in VOP2_CARRY or name in F16_NAMES
+        ):
             names[family].append((opcode, name))
     blocks = []  # (words, branch template or None): a branch's offset is patched once the layout is known
     for _ in range(rng.randrange(1, 11)):
@@ -370,6 +374,10 @@ def instruction(rng, names):
 LITERAL_OPERATION_NAMES = ("v_madmk_f32", "v_madak_f32", "v_fmamk_f32", "v_fmaak_f32")
 # The 64-bit operations (including v_fma_f64 now that overflow returns ±infinity in both models).
 WIDE_GENERIC = tuple(WIDE_OPERATIONS)
+# The scalar half-precision operations (emu/rdna2_exec_f16.py) that the Rust port runs, in VOP1, VOP2 and VOP3.
+# The transcendentals are not ported yet: the Rust refuses them, so they stay out of the generator until they are.
+F16_TRANSCENDENTALS = ("v_rcp_f16", "v_sqrt_f16", "v_rsq_f16", "v_log_f16", "v_exp_f16", "v_sin_f16", "v_cos_f16")
+F16_NAMES = tuple(name for name in F16_OPERATIONS if name not in F16_TRANSCENDENTALS)
 DIV_NAMES = (
     "v_div_scale_f32", "v_div_scale_f64", "v_div_fmas_f32", "v_div_fmas_f64", "v_div_fixup_f32", "v_div_fixup_f64",
 )

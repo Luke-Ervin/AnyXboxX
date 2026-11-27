@@ -12,6 +12,9 @@
 //! `format_exec`), and the 2D MIMG instructions (`image_desc`, `image_texel`, `image_sample`,
 //! `image_exec`), and the graphics instructions: exports (`export`) and
 //! interpolation (`interp`).
+//!
+//! Also the scalar half-precision operations of VOP1, VOP2 and VOP3 (`f16`, with the operations in
+//! `f16_ops`), apart from the f16 transcendentals and compares, which are not ported yet.
 
 pub mod atomic;
 pub mod atomic_float;
@@ -28,6 +31,8 @@ pub mod exec;
 pub mod export;
 pub mod ext;
 pub mod ext_compare;
+pub mod f16;
+pub mod f16_ops;
 pub mod flat;
 pub mod float;
 pub mod format_access;

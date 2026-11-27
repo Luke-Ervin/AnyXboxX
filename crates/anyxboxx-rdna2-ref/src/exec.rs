@@ -45,6 +45,12 @@ fn execute_vector(
         return Ok(true);
     }
     let fields = vector::fields(family, word);
+    if crate::f16::is_operation(name) {
+        // Ahead of the extension forms, as in the Python: the half-precision operations refuse their own
+        // SDWA and DPP sources.
+        crate::f16::execute(wave, name, &fields, literal)?;
+        return Ok(true);
+    }
     let carry = family == "VOP2" && vector::is_carry(name);
     if EXTENSION_CODES.contains(&(word & 0x1FF)) {
         if crate::wide::spec(name).is_some() || crate::movrel::is_vector(name) {

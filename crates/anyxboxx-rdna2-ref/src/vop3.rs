@@ -351,6 +351,11 @@ pub fn execute(
         crate::pkf16::execute_fmac_vop3(wave, word, literal)?;
         return Ok(true);
     }
+    if crate::f16::is_operation(name) {
+        // Right after v_pk_fmac_f16, as in the Python dispatch.
+        crate::f16::execute_vop3(wave, name, word, literal)?;
+        return Ok(true);
+    }
     if crate::wide::execute(
         wave,
         name,

@@ -129,7 +129,7 @@ pub fn half_clamp(bits: u32) -> u32 {
 }
 
 /// The inline half of a source code (240 to 248), if it is one.
-fn inline_half(code: u32) -> Option<u32> {
+pub fn inline_half(code: u32) -> Option<u32> {
     INLINE_HALVES
         .iter()
         .find(|(inline, _)| *inline == code)
